@@ -141,6 +141,7 @@ func SetKVClient(backend string, addr string, DeviceID string) *db.Backend {
 		logger.Fatalw("Failed to init KV client\n", log.Fields{"err": err})
 		return nil
 	}
+
 	kvbackend := &db.Backend{
 		Client:     kvClient,
 		StoreType:  backend,
@@ -804,6 +805,7 @@ func (RsrcMgr *OpenOltResourceMgr) FreePONResourcesForONU(ctx context.Context, i
 
 	RsrcMgr.AllocIDMgmtLock[intfID].Lock()
 	AllocIDs := RsrcMgr.ResourceMgrs[intfID].GetCurrentAllocIDForOnu(ctx, IntfOnuIDUniID)
+
 	RsrcMgr.ResourceMgrs[intfID].FreeResourceID(ctx, intfID,
 		ponrmgr.ALLOC_ID,
 		AllocIDs)
