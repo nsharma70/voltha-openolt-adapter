@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -96,12 +95,20 @@ func (a *adapter) start(ctx context.Context) {
 		p.UpdateStatus("kv-store", probe.ServiceStatusRunning)
 	}
 
+	err = kvstore.ValidateAddress(a.config.KVStoreAddress)
+	if err != nil {
+		logger.Fatal("Invalid address\n")
+	}
 	// Setup Log Config
-	cm := conf.NewConfigManager(a.kvClient, a.config.KVStoreType, a.config.KVStoreHost, a.config.KVStorePort, a.config.KVStoreTimeout)
+	cm := conf.NewConfigManager(a.kvClient, a.config.KVStoreType, a.config.KVStoreAddress, a.config.KVStoreTimeout)
 	go conf.StartLogLevelConfigProcessing(cm, ctx)
 
+	err = kvstore.ValidateAddress(a.config.KafkaAdapterAddress)
+	if err != nil {
+		logger.Fatal("Invalid address\n")
+	}
 	// Setup Kafka Client
-	if a.kafkaClient, err = newKafkaClient("sarama", a.config.KafkaAdapterHost, a.config.KafkaAdapterPort); err != nil {
+	if a.kafkaClient, err = newKafkaClient("sarama", a.config.KafkaAdapterAddress); err != nil {
 		logger.Fatalw("Unsupported-common-client", log.Fields{"error": err})
 	}
 
@@ -287,14 +294,13 @@ func newKVClient(storeType, address string, timeout int) (kvstore.Client, error)
 	return nil, errors.New("unsupported-kv-store")
 }
 
-func newKafkaClient(clientType, host string, port int) (kafka.Client, error) {
+func newKafkaClient(clientType, address string) (kafka.Client, error) {
 
 	logger.Infow("common-client-type", log.Fields{"client": clientType})
 	switch clientType {
 	case "sarama":
 		return kafka.NewSaramaClient(
-			kafka.Host(host),
-			kafka.Port(port),
+			kafka.Address(address),
 			kafka.ProducerReturnOnErrors(true),
 			kafka.ProducerReturnOnSuccess(true),
 			kafka.ProducerMaxRetries(6),
@@ -306,8 +312,12 @@ func newKafkaClient(clientType, host string, port int) (kafka.Client, error) {
 }
 
 func (a *adapter) setKVClient() error {
-	addr := a.config.KVStoreHost + ":" + strconv.Itoa(a.config.KVStorePort)
-	client, err := newKVClient(a.config.KVStoreType, addr, a.config.KVStoreTimeout)
+
+	err := kvstore.ValidateAddress(a.config.KVStoreAddress)
+	if err != nil {
+		logger.Fatal("Invalid address\n")
+	}
+	client, err := newKVClient(a.config.KVStoreType, a.config.KVStoreAddress, a.config.KVStoreTimeout)
 	if err != nil {
 		a.kvClient = nil
 		return err
@@ -318,12 +328,11 @@ func (a *adapter) setKVClient() error {
 }
 
 func (a *adapter) startInterContainerProxy(ctx context.Context, retries int) (kafka.InterContainerProxy, error) {
-	logger.Infow("starting-intercontainer-messaging-proxy", log.Fields{"host": a.config.KafkaAdapterHost,
-		"port": a.config.KafkaAdapterPort, "topic": a.config.Topic})
+	logger.Infow("starting-intercontainer-messaging-proxy", log.Fields{"address": a.config.KafkaAdapterAddress,
+		"topic": a.config.Topic})
 	var err error
 	kip := kafka.NewInterContainerProxy(
-		kafka.InterContainerHost(a.config.KafkaAdapterHost),
-		kafka.InterContainerPort(a.config.KafkaAdapterPort),
+		kafka.InterContainerAddress(a.config.KafkaAdapterAddress),
 		kafka.MsgClient(a.kafkaClient),
 		kafka.DefaultTopic(&kafka.Topic{Name: a.config.Topic}))
 	count := 0
@@ -509,7 +518,7 @@ func main() {
 	ad := newAdapter(cf)
 
 	p := &probe.Probe{}
-	go p.ListenAndServe(fmt.Sprintf("%s:%d", ad.config.ProbeHost, ad.config.ProbePort))
+	go p.ListenAndServe(ad.config.ProbeAddress)
 
 	probeCtx := context.WithValue(ctx, probe.ProbeContextKey, p)
 
